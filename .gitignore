@@ -1,0 +1,11 @@
+# Node dependencies
+node_modules/
+
+# Local environment files containing secret keys
+.env
+.env.local
+.env.production
+
+# System files
+.DS_Store
+Thumbs.db
