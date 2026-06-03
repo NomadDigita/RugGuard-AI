@@ -1,5 +1,7 @@
 import TelegramBot from 'node-telegram-bot-api';
 import dotenv from 'dotenv';
+import http from 'http';
+import https from 'https';
 import { analyzeTarget } from './security.js';
 import { performWebSearch } from './search.js';
 import { generateSecurityReport } from './ai.js';
@@ -26,6 +28,37 @@ verifyBitgetCredentials().then(result => {
     console.warn(`⚠️ Bitget API Setup Warning: ${result.reason}`);
   }
 });
+
+// ==================== RENDER ALIVE ENGINE ====================
+
+const PORT = process.env.PORT || 8080;
+
+// Create a simple HTTP health check server for Render
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('RugGuard AI is running and active.');
+});
+
+server.listen(PORT, () => {
+  console.log(`📡 Health Check Server running on port ${PORT}`);
+});
+
+// Self-ping loop (triggers every 10 minutes)
+const pingInterval = 10 * 60 * 1000; // 10 minutes
+setInterval(() => {
+  const selfUrl = process.env.RENDER_EXTERNAL_URL;
+  if (selfUrl) {
+    https.get(selfUrl, (res) => {
+      console.log(`🔄 Self-ping sent to ${selfUrl} - Status: ${res.statusCode}`);
+    }).on('error', (err) => {
+      console.error(`⚠️ Self-ping failed: ${err.message}`);
+    });
+  } else {
+    console.log('ℹ️ Self-ping skipped: RENDER_EXTERNAL_URL is not configured in environment.');
+  }
+}, pingInterval);
+
+// =============================================================
 
 // Handle /start Command
 bot.onText(/\/start/, (msg) => {
