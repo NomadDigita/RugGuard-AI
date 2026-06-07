@@ -33,7 +33,7 @@ const alertSubscribers = new Set();
 
 console.log('🤖 RugGuard AI Safety Agent is online and listening...');
 
-// Navigation Keyboard Setup (Persistent Bottom Menu)
+// Persistent Bottom Menu Layout
 const bottomMenuKeyboard = {
   reply_markup: {
     keyboard: [
@@ -45,6 +45,18 @@ const bottomMenuKeyboard = {
   }
 };
 
+// Returns interactive inline buttons for managing alerts
+const getAlertsInlineMarkup = () => {
+  return {
+    inline_keyboard: [
+      [
+        { text: '🔔 Turn Alerts ON', callback_data: 'toggle_alerts_on' },
+        { text: '🔕 Turn Alerts OFF', callback_data: 'toggle_alerts_off' }
+      ]
+    ]
+  };
+};
+
 // Handle /start Command
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
@@ -54,24 +66,39 @@ _Check before you ape._
 
 I am an autonomous security bot engineered to analyze Web3 smart contracts, tokens, and dApp links to prevent rug pulls, honeypots, and phishing attacks.
 
-🔔 **Live Alerts:**
-Use \`/alerts_on\` to subscribe to our 24/7 background scanner. I will automatically alert you when a high-risk token is detected.
+🔔 **Live Alerts Subscription:**
+Subscribe to our 24/7 background scanner using the interactive buttons below to receive instant warnings when unverified/malicious on-chain activity is identified.
 `;
-  bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown', ...bottomMenuKeyboard });
+  bot.sendMessage(chatId, welcomeMessage, { 
+    parse_mode: 'Markdown', 
+    reply_markup: getAlertsInlineMarkup(),
+    ...bottomMenuKeyboard 
+  });
 });
 
-// Handle alert subscriptions
-bot.onText(/\/alerts_on/, (msg) => {
-  const chatId = msg.chat.id;
-  alertSubscribers.add(chatId);
-  bot.sendMessage(chatId, '🔔 **RugGuard Live Alerts: Subscribed**\n\nI will now scan trending contracts every 5 minutes and alert you immediately if a security risk is detected.', { parse_mode: 'Markdown' });
-});
+// ==================== CALLBACK QUERY LISTENER (INLINE ACTIONS) ====================
+bot.on('callback_query', async (query) => {
+  const chatId = query.message.chat.id;
+  const messageId = query.message.message_id;
+  const action = query.data;
 
-bot.onText(/\/alerts_off/, (msg) => {
-  const chatId = msg.chat.id;
-  alertSubscribers.delete(chatId);
-  bot.sendMessage(chatId, '🔕 **RugGuard Live Alerts: Unsubscribed**\n\nYou will no longer receive background scanner notifications.', { parse_mode: 'Markdown' });
+  try {
+    if (action === 'toggle_alerts_on') {
+      alertSubscribers.add(chatId);
+      await bot.answerCallbackQuery(query.id, { text: 'Subscribed to Live Alerts!', show_alert: false });
+      await bot.sendMessage(chatId, '🔔 **Live Alerts: Subscribed**\n\nI will now monitor trending pairs on Solana/EVM every 5 minutes and alert you if a security risk is identified.', { parse_mode: 'Markdown' });
+    }
+
+    if (action === 'toggle_alerts_off') {
+      alertSubscribers.delete(chatId);
+      await bot.answerCallbackQuery(query.id, { text: 'Unsubscribed from Live Alerts.', show_alert: false });
+      await bot.sendMessage(chatId, '🔕 **Live Alerts: Unsubscribed**\n\nYou will no longer receive background monitoring alerts.', { parse_mode: 'Markdown' });
+    }
+  } catch (error) {
+    console.error('Callback Query Processing Error:', error.message);
+  }
 });
+// =================================================================================
 
 // Handle Bottom Keyboard and general text inputs
 bot.on('message', async (msg) => {
@@ -103,9 +130,12 @@ bot.on('message', async (msg) => {
 
 • **Scan Tokens:** Send any contract address (Solana/EVM) directly into the chat to generate a risk profile.
 • **Scan dApps:** Paste website links to identify malicious domains or phishing redirects.
-• **Live Alerts:** Turn alerts on or off using \`/alerts_on\` and \`/alerts_off\`.
+• **Live Alerts:** Toggle monitoring instantly using the subscription buttons below.
 `;
-    return bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
+    return bot.sendMessage(chatId, helpText, { 
+      parse_mode: 'Markdown',
+      reply_markup: getAlertsInlineMarkup()
+    });
   }
 
   if (text === '🛡️ System Status') {
@@ -122,13 +152,16 @@ bot.on('message', async (msg) => {
 • **Tavily Web Search:** \`${tavilyStatus}\`
 • **Solana Node RPC:** \`Mainnet-Beta Active\`
 • **Bitget API Verification:** \`${bitgetCheck.success ? 'Verified' : 'Access Restricted - Read-Only Active'}\`
-• **Subscribers:** \`${alertSubscribers.size} active chats\`
+• **Active Subscribers:** \`${alertSubscribers.size} chats\`
 • **Container Keep-Alive:** \`Active 24/7 (Uptime OK)\`
 
-🟢 All systems running normally. Use the interface to initiate target audits.
+🟢 All systems running normally. Toggle your alert subscriptions below:
 `;
     await bot.deleteMessage(chatId, statusMsg.message_id);
-    return bot.sendMessage(chatId, systemStatusText, { parse_mode: 'Markdown' });
+    return bot.sendMessage(chatId, systemStatusText, { 
+      parse_mode: 'Markdown',
+      reply_markup: getAlertsInlineMarkup()
+    });
   }
 
   // Treat all other text inputs as scan targets
@@ -164,7 +197,18 @@ bot.on('message', async (msg) => {
     const score = scoreMatch ? parseInt(scoreMatch[1]) : 50;
 
     // Generate dynamic security gauge
-    const gaugeUrl = generateSecurityGaugeUrl(score, text.substring(0, 10) + '...');
+    const targetDisplay = text.substring(0, 10) + '...';
+    const gaugeUrl = generateSecurityGaugeUrl(score, targetDisplay);
+
+    // Formulate a clean, Web2-friendly summary card for the Image Caption
+    const summaryCaption = `
+🛡️ **RUGGUARD AI SECURITY AUDIT REPORT**
+• **Target:** \`${text}\`
+• **Risk Score:** \`${score} / 100\`
+• **Safety Status:** \`${score > 70 ? '🟢 SAFE' : score > 40 ? '🟡 CAUTION' : '🔴 HIGH RISK'}\`
+
+_Deep on-chain analysis and forensic trace completed successfully. The complete, un-truncated report has been compiled and sent below._
+`;
 
     const inlineButtons = {
       reply_markup: {
@@ -179,12 +223,16 @@ bot.on('message', async (msg) => {
 
     await bot.deleteMessage(chatId, statusMsg.message_id);
 
-    // Send visual dial gauge with the AI report as the caption card
+    // === Split-Message Delivery ===
+    // 1. Send Visual Gauge with high-impact Web2 summary card
     await bot.sendPhoto(chatId, gaugeUrl, {
-      caption: auditReport.substring(0, 1024), // Telegram caption limit safety
+      caption: summaryCaption,
       parse_mode: 'Markdown',
       ...inlineButtons
     });
+
+    // 2. Instantly follow up with the complete, detailed AI report
+    await bot.sendMessage(chatId, auditReport, { parse_mode: 'Markdown' });
 
   } catch (error) {
     console.error('Audit Engine Failure:', error);
@@ -261,17 +309,14 @@ bot.onText(/\/market\s+(.+)/, async (msg, match) => {
 });
 
 // ==================== AUTONOMOUS MEME SCAN ALERT ENGINE ====================
-// Runs every 5 minutes to audit new trending tokens
 const ALERT_INTERVAL = 5 * 60 * 1000;
 
 setInterval(async () => {
   if (alertSubscribers.size === 0) return;
 
   try {
-    // Fetch newly created trading tokens from DexScreener's open API
     const response = await axios.get('https://api.dexscreener.com/token-profiles/latest/v1');
     if (response.data && Array.isArray(response.data)) {
-      // Analyze the single latest token profile in detail to conserve free-tier memory
       const targetToken = response.data[0];
       if (targetToken && targetToken.tokenAddress) {
         const address = targetToken.tokenAddress;
@@ -284,29 +329,32 @@ setInterval(async () => {
 
         const auditReport = await generateSecurityReport(securityResult, searchResult);
 
-        // Parse risk levels
         const scoreMatch = auditReport.match(/RISK SCORE:\s*(\d+)/i);
         const score = scoreMatch ? parseInt(scoreMatch[1]) : 50;
 
-        // If high safety warning detected (score < 30), broadcast to all active subscribers
+        // Broadcast if high risk (score < 30)
         if (score < 30) {
           const alertGaugeUrl = generateSecurityGaugeUrl(score, symbol);
-          const alertText = `
+          
+          const alertSummary = `
 🚨 **AUTONOMOUS RUGGUARD EMERGENCY ALERT** 🚨
 _Coordinated Scam / Malicious Activity Detected in Trending Pools_
 
 • **Token Name:** \`${symbol}\`
 • **Contract Address:** \`${address}\`
 • **Blockchain Network:** \`${targetToken.chainId || 'solana'}\`
-
-${auditReport.substring(0, 600)}...
+• **Safety Rating:** \`${score} / 100 - HIGH RISK\`
 `;
 
           for (const chatId of alertSubscribers) {
+            // Send Gauge + Summary Card
             await bot.sendPhoto(chatId, alertGaugeUrl, {
-              caption: alertText,
+              caption: alertSummary,
               parse_mode: 'Markdown'
             });
+
+            // Send full detailed audit following the alert card
+            await bot.sendMessage(chatId, auditReport, { parse_mode: 'Markdown' });
           }
         }
       }

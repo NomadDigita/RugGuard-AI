@@ -3,7 +3,6 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Initialize the OpenAI client pointing to Alibaba Qwen's DashScope compatible endpoint
 const openai = new OpenAI({
   apiKey: process.env.QWEN_API_KEY,
   baseURL: process.env.QWEN_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1'
@@ -11,29 +10,25 @@ const openai = new OpenAI({
 
 /**
  * Generates a unified risk report by reasoning over contract data and web search traces
- * @param {object} securityResult The output from security.js check
- * @param {object} searchResult The output from search.js search
  */
 export async function generateSecurityReport(securityResult, searchResult) {
   try {
     const systemPrompt = `You are RugGuard AI, an elite Web3 Smart Contract Auditor and On-chain Forensics Analyst. 
 Your purpose is to protect crypto traders from rug pulls, honeypots, malicious smart contracts, phishing attempts, and exit scams.
 
-You have access to unique raw forensic traces:
-- Genesis Funding Source: Shows the wallet that originally funded the developer.
-- Sybil Cluster Status: Indicates if this funding source has launched or interacted with multiple other wallets on-chain. If true, this is a major warning of automated "Sybil" scan networks.
+Your analysis must pay strict attention to:
+- LIQUIDITY POOL (LP) SECURITY: Check if LP tokens are burned (sent to dead addresses like 0x000... or 1111...) or locked in secure lockers. Unlocked liquidity is the #1 rug vector.
+- GENESIS FUNDING FORENSICS: Note who funded the creator and check for Sybil Cluster Scam Networks (where one funding wallet deploys multiple copycat scams).
 
-Analyze the raw on-chain security data, the developer forensics, and the accompanying web search intelligence context.
-Synthesize this information and output a structured, objective security audit report in clear, telegram-friendly Markdown format.
-
-Your report must strictly include:
+Format your output using professional, highly structured sections:
 1. RISK SCORE: A calculated numerical score from 0 (Critical Scam / Active Rug) to 100 (Safe).
 2. RISK LEVEL: Critical, High, Medium, or Low risk classification.
-3. ON-CHAIN & FORENSIC FINDINGS: Evaluate contract permissions (mint/freeze authority) and Developer trace results. Specifically highlight if a "Sybil Cluster Network" was detected.
-4. WEB INTEL SUMMARY: Highlights or red flags discovered from web/social sentiment searches.
-5. EXPLANATION & SUGGESTIONS: Clear advice on what the user should do next.
+3. 💧 LIQUIDITY Pool & LP LOCK STATUS: Audit of the LP status, showing if it's burned, locked, or exposed.
+4. ⚙️ ON-CHAIN & DEVELOPER FORENSICS: Analyze mint/freeze authorities, genesis funding, and Sybil cluster networks.
+5. 🌐 WEB & SOCIAL INTELLIGENCE: Search results, community sentiment, or team records.
+6. 🛡️ ACTIONABLE RECOMMENDATIONS: Clear instructions for the user.
 
-Be direct, analytical, and highly precise. Format the message clearly with bold headings and structured bullet points.`;
+Write in clear, direct, and professional Markdown. Do not abbreviate or shorten your findings. Offer an exhaustive, high-end evaluation.`;
 
     const userContent = `### Target Under Analysis
 Target Type: ${securityResult.type}
@@ -49,12 +44,12 @@ Raw Search Traces:
 ${JSON.stringify(searchResult.results, null, 2)}`;
 
     const response = await openai.chat.completions.create({
-      model: 'qwen-plus', // Using Alibaba Qwen-Plus for advanced analytical reasoning
+      model: 'qwen-plus',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent }
       ],
-      temperature: 0.1, // Keep score calculation and analysis deterministic and analytical
+      temperature: 0.1,
       max_tokens: 1500
     });
 
