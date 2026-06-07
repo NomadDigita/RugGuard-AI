@@ -34,15 +34,15 @@ export async function checkBitgetListing(symbol) {
 }
 
 /**
- * Fetches real historical price candles from Bitget and generates a branded QuickChart URL
+ * Fetches historical price candles from Bitget and generates a branded QuickChart URL
  */
 export async function generateBitgetChartUrl(symbol) {
   const cleanSymbol = symbol.toUpperCase().replace('USDT', '');
   const pairName = `${cleanSymbol}USDT`;
 
   try {
-    // Fetch last 12 hourly candles from Bitget
-    const response = await axios.get('https://api.bitget.com/api/v2/spot/market/history-candles', {
+    // Corrected to public v2 endpoint: /api/v2/spot/market/candles
+    const response = await axios.get('https://api.bitget.com/api/v2/spot/market/candles', {
       params: {
         symbol: pairName,
         granularity: '1h',
@@ -51,16 +51,13 @@ export async function generateBitgetChartUrl(symbol) {
     });
 
     if (response.data && response.data.code === '00000' && Array.isArray(response.data.data)) {
-      const candles = response.data.data; // Structure: [[ts, open, high, low, close, volume], ...]
-      
-      // Extract closing prices and format timestamps
+      const candles = response.data.data;
       const prices = candles.map(c => parseFloat(c[4])).reverse();
       const labels = candles.map(c => {
         const date = new Date(parseInt(c[0]));
         return `${date.getHours()}:00`;
       }).reverse();
 
-      // Configure a professional Dark-Themed Chart.js structure for QuickChart API
       const chartConfig = {
         type: 'line',
         data: {
@@ -68,7 +65,7 @@ export async function generateBitgetChartUrl(symbol) {
           datasets: [{
             label: `${pairName} (1H Timeline)`,
             data: prices,
-            borderColor: '#ff3366', // RugGuard signature Crimson Red
+            borderColor: '#ff3366',
             backgroundColor: 'rgba(255, 51, 102, 0.1)',
             fill: true,
             pointRadius: 3,
@@ -98,13 +95,50 @@ export async function generateBitgetChartUrl(symbol) {
         }
       };
 
-      // Generate a clean chart URL using QuickChart
       return `https://quickchart.io/chart?bkg=%230d0e15&w=600&h=350&c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
     }
   } catch (error) {
     console.error('Failed to generate live market chart:', error.message);
   }
   return null;
+}
+
+/**
+ * Generates a branded visual dial gauge showing the Security Integrity Score
+ * @param {number} score Safety score from 0 to 100
+ * @param {string} symbol Token name or address
+ */
+export function generateSecurityGaugeUrl(score, symbol) {
+  const safetyPercentage = Math.min(100, Math.max(0, score));
+  const riskPercentage = 100 - safetyPercentage;
+  const color = safetyPercentage > 70 ? '#00e676' : safetyPercentage > 40 ? '#ffeb3b' : '#ff3366';
+
+  const chartConfig = {
+    type: 'doughnut',
+    data: {
+      datasets: [{
+        data: [safetyPercentage, riskPercentage],
+        backgroundColor: [color, '#232530'],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      title: {
+        display: true,
+        text: `Security Audit Score: ${symbol}`,
+        fontColor: '#ffffff',
+        fontSize: 18
+      },
+      rotation: 1 * Math.PI,
+      circumference: 1 * Math.PI,
+      cutoutPercentage: 80,
+      plugins: {
+        datalabels: { display: false }
+      }
+    }
+  };
+
+  return `https://quickchart.io/chart?bkg=%230d0e15&w=500&h=300&c=${encodeURIComponent(JSON.stringify(chartConfig))}`;
 }
 
 /**
@@ -122,7 +156,6 @@ export async function verifyBitgetCredentials() {
   try {
     const timestamp = Date.now().toString();
     const method = 'GET';
-    // Direct account lookup path to verify Read permissions
     const requestPath = '/api/v2/mix/account/accounts?productType=USDT-FUTURES';
     
     const preHash = timestamp + method + requestPath;
