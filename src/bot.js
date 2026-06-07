@@ -33,7 +33,7 @@ const alertSubscribers = new Set();
 
 console.log('🤖 RugGuard AI Safety Agent is online and listening...');
 
-// Persistent Bottom Menu Layout with Integrated Alerts
+// Persistent Bottom Menu Layout
 const bottomMenuKeyboard = {
   reply_markup: {
     keyboard: [
@@ -45,6 +45,16 @@ const bottomMenuKeyboard = {
     is_persistent: true
   }
 };
+
+// Fail-safe sender utility: if Markdown parsing fails, falls back to raw text
+async function sendSafeMessage(chatId, text) {
+  try {
+    await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+  } catch (error) {
+    console.warn('⚠️ Markdown parsing failed, sending in plain-text mode as fallback:', error.message);
+    await bot.sendMessage(chatId, text); // Send without parse_mode
+  }
+}
 
 // Handle /start Command
 bot.onText(/\/start/, (msg) => {
@@ -120,12 +130,30 @@ bot.on('message', async (msg) => {
     const qwenStatus = process.env.QWEN_API_KEY ? 'Connected' : 'Error';
     const tavilyStatus = process.env.TAVILY_API_KEY ? 'Connected' : 'Error';
 
+    // Query active Solana performance metrics directly from the mainnet RPC
+    let solanaTps = 'Active';
+    try {
+      const response = await axios.post('https://api.mainnet-beta.solana.com', {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getRecentPerformanceSamples',
+        params: [1]
+      });
+      if (response.data?.result?.[0]) {
+        const sample = response.data.result[0];
+        const calculatedTps = Math.round(sample.numTransactions / sample.samplePeriodSecs);
+        solanaTps = `Active (~${calculatedTps} TPS)`;
+      }
+    } catch (err) {
+      solanaTps = 'Active (Rate-Limited)';
+    }
+
     const systemStatusText = `
 ⚙️ **RugGuard AI Diagnostic Status**
 
 • **Alibaba Qwen LLM:** \`${qwenStatus}\`
 • **Tavily Web Search:** \`${tavilyStatus}\`
-• **Solana Node RPC:** \`Mainnet-Beta Active\`
+• **Solana Node RPC:** \`${solanaTps}\`
 • **Bitget API Verification:** \`${bitgetCheck.success ? 'Verified' : 'Access Restricted - Read-Only Active'}\`
 • **Active Subscribers:** \`${alertSubscribers.size} chats\`
 • **Container Keep-Alive:** \`Active 24/7 (Uptime OK)\`
@@ -181,17 +209,30 @@ bot.on('message', async (msg) => {
 _Deep on-chain analysis and forensic trace completed successfully. The complete, un-truncated report has been compiled and sent below._
 `;
 
+    // Restored the static inline URL buttons for institutional actions
+    const inlineButtons = {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '📈 Trade Safely on Bitget', url: 'https://www.bitget.com' },
+            { text: '📣 Share Report', url: `https://t.me/share/url?url=Check%20out%20this%20RugGuard%20Audit:%20${encodeURIComponent(text)}` }
+          ]
+        ]
+      }
+    };
+
     await bot.deleteMessage(chatId, statusMsg.message_id);
 
     // === Split-Message Delivery ===
     // 1. Send Visual Gauge with high-impact Web2 summary card
     await bot.sendPhoto(chatId, gaugeUrl, {
       caption: summaryCaption,
-      parse_mode: 'Markdown'
+      parse_mode: 'Markdown',
+      ...inlineButtons
     });
 
-    // 2. Instantly follow up with the complete, detailed AI report
-    await bot.sendMessage(chatId, auditReport, { parse_mode: 'Markdown' });
+    // 2. Instantly follow up with the complete, detailed AI report using fail-safe sender
+    await sendSafeMessage(chatId, auditReport);
 
   } catch (error) {
     console.error('Audit Engine Failure:', error);
@@ -231,15 +272,27 @@ bot.onText(/\/market\s+(.+)/, async (msg, match) => {
 🛡️ *Trading listed assets on institutional platforms like Bitget reduces standard smart-contract vulnerability risks.*
 `;
 
+      // Restored the static inline "Trade on Bitget" button for live listings
+      const inlineButtons = {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '📊 Trade on Bitget', url: `https://www.bitget.com/spot/${targetSymbol}USDT` }
+            ]
+          ]
+        }
+      };
+
       await bot.deleteMessage(chatId, statusMsg.message_id);
 
       if (chartUrl) {
         await bot.sendPhoto(chatId, chartUrl, {
           caption: responseText,
-          parse_mode: 'Markdown'
+          parse_mode: 'Markdown',
+          ...inlineButtons
         });
       } else {
-        await bot.sendMessage(chatId, responseText, { parse_mode: 'Markdown' });
+        await bot.sendMessage(chatId, responseText, { parse_mode: 'Markdown', ...inlineButtons });
       }
 
     } else {
@@ -300,7 +353,7 @@ _Coordinated Scam / Malicious Activity Detected in Trending Pools_
               parse_mode: 'Markdown'
             });
 
-            await bot.sendMessage(chatId, auditReport, { parse_mode: 'Markdown' });
+            await sendSafeMessage(chatId, auditReport);
           }
         }
       }

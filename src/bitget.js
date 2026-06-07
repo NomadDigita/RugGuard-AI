@@ -41,7 +41,6 @@ export async function generateBitgetChartUrl(symbol) {
   const pairName = `${cleanSymbol}USDT`;
 
   try {
-    // Corrected to public v2 endpoint: /api/v2/spot/market/candles
     const response = await axios.get('https://api.bitget.com/api/v2/spot/market/candles', {
       params: {
         symbol: pairName,
