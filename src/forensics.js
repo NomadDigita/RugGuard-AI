@@ -1,11 +1,7 @@
 import axios from 'axios';
 
-// Public Solana Mainnet RPC endpoint (used for live on-chain tracing)
 const SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com';
 
-/**
- * Executes a raw JSON-RPC query on the Solana network
- */
 async function solanaRpcRequest(method, params) {
   try {
     const response = await axios.post(SOLANA_RPC_URL, {
@@ -13,7 +9,7 @@ async function solanaRpcRequest(method, params) {
       id: 1,
       method,
       params
-    });
+    }, { timeout: 10000 }); // 10-second request timeout to prevent hanging
     return response.data?.result || null;
   } catch (error) {
     console.error(`Solana RPC Error [${method}]:`, error.message);
@@ -21,10 +17,6 @@ async function solanaRpcRequest(method, params) {
   }
 }
 
-/**
- * Analyzes Solana Token authorities and traces the creator identity and funding lineage
- * @param {string} mintAddress The Solana token contract address
- */
 export async function traceSolanaTokenForensics(mintAddress) {
   const report = {
     targetMint: mintAddress,
@@ -44,100 +36,95 @@ export async function traceSolanaTokenForensics(mintAddress) {
       { encoding: 'jsonParsed' }
     ]);
 
-    if (accountInfo && accountInfo.value) {
-      const parsedData = accountInfo.value.data?.parsed?.info;
-      if (parsedData) {
-        report.hasMintAuthority = parsedData.mintAuthority !== null;
-        report.hasFreezeAuthority = parsedData.freezeAuthority !== null;
-      }
+    if (accountInfo?.value?.data?.parsed?.info) {
+      const parsedData = accountInfo.value.data.parsed.info;
+      report.hasMintAuthority = parsedData.mintAuthority !== null;
+      report.hasFreezeAuthority = parsedData.freezeAuthority !== null;
     }
 
-    // 2. Find the Genesis Transaction of the Mint to discover the Creator
-    // We fetch signatures in reverse order to find the oldest (first) signature
+    // 2. Find the Genesis Transaction of the Mint
     const signatures = await solanaRpcRequest('getSignaturesForAddress', [
       mintAddress,
       { limit: 20 }
     ]);
 
-    if (signatures && signatures.length > 0) {
-      // The oldest signature returned is likely the genesis tx (creation)
-      const genesisTxSignature = signatures[signatures.length - 1].signature;
+    if (Array.isArray(signatures) && signatures.length > 0) {
+      const genesisTxSignature = signatures[signatures.length - 1]?.signature;
 
-      // Fetch transaction details
-      const txDetails = await solanaRpcRequest('getTransaction', [
-        genesisTxSignature,
-        { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }
-      ]);
+      if (genesisTxSignature) {
+        const txDetails = await solanaRpcRequest('getTransaction', [
+          genesisTxSignature,
+          { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }
+        ]);
 
-      if (txDetails && txDetails.transaction) {
-        // The first account in accountKeys that signed is the deployer/creator
-        const signers = txDetails.transaction.message.accountKeys.filter(acc => acc.signer);
-        if (signers.length > 0) {
-          report.creatorAddress = signers[0].pubkey || signers[0];
+        if (txDetails?.transaction?.message?.accountKeys) {
+          const signers = txDetails.transaction.message.accountKeys.filter(acc => acc.signer);
+          if (signers.length > 0) {
+            report.creatorAddress = signers[0]?.pubkey || signers[0];
+          }
         }
       }
     }
 
-    // 3. Trace Creator's Funding Lineage (Genesis Funding Wallet)
+    // 3. Trace Creator's Funding Lineage
     if (report.creatorAddress) {
       const creatorSignatures = await solanaRpcRequest('getSignaturesForAddress', [
         report.creatorAddress,
         { limit: 10 }
       ]);
 
-      if (creatorSignatures && creatorSignatures.length > 0) {
-        const creatorGenesisSig = creatorSignatures[creatorSignatures.length - 1].signature;
-        const creatorGenesisTx = await solanaRpcRequest('getTransaction', [
-          creatorGenesisSig,
-          { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }
-        ]);
+      if (Array.isArray(creatorSignatures) && creatorSignatures.length > 0) {
+        const creatorGenesisSig = creatorSignatures[creatorSignatures.length - 1]?.signature;
+        
+        if (creatorGenesisSig) {
+          const creatorGenesisTx = await solanaRpcRequest('getTransaction', [
+            creatorGenesisSig,
+            { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }
+          ]);
 
-        if (creatorGenesisTx && creatorGenesisTx.meta) {
-          // Identify who sent the initial SOL to the creator's wallet
-          const balanceChanges = creatorGenesisTx.meta.postBalances;
-          const preBalances = creatorGenesisTx.meta.preBalances;
-          
-          // Look for account keys involved that sent funds
-          const accountKeys = creatorGenesisTx.transaction.message.accountKeys;
-          for (let i = 0; i < accountKeys.length; i++) {
-            const pubkey = accountKeys[i].pubkey || accountKeys[i];
-            if (pubkey !== report.creatorAddress && preBalances[i] > balanceChanges[i]) {
-              // Found a wallet that sent SOL to fund this deployer
-              report.genesisFundingWallet = pubkey;
-              break;
+          if (creatorGenesisTx?.meta?.postBalances && creatorGenesisTx?.transaction?.message?.accountKeys) {
+            const preBalances = creatorGenesisTx.meta.preBalances;
+            const postBalances = creatorGenesisTx.meta.postBalances;
+            const accountKeys = creatorGenesisTx.transaction.message.accountKeys;
+
+            for (let i = 0; i < accountKeys.length; i++) {
+              const pubkey = accountKeys[i]?.pubkey || accountKeys[i];
+              if (pubkey !== report.creatorAddress && preBalances[i] > postBalances[i]) {
+                report.genesisFundingWallet = pubkey;
+                break;
+              }
             }
           }
         }
       }
     }
 
-    // 4. Sybil Scam Cluster Check (Scans if the parent wallet funded other launch accounts)
-    if (report.genesisFundingWallet) {
+    // 4. Sybil Scam Cluster Check
+    if (report.genesisFundingWallet && report.genesisFundingWallet !== 'Direct/Unknown') {
       const fundingTxHistory = await solanaRpcRequest('getSignaturesForAddress', [
         report.genesisFundingWallet,
-        { limit: 30 }
+        { limit: 15 } // Lower limit to conserve free-tier memory and prevent execution timeouts
       ]);
 
-      if (fundingTxHistory && fundingTxHistory.length > 0) {
+      if (Array.isArray(fundingTxHistory) && fundingTxHistory.length > 0) {
         const associatedDeployers = new Set();
 
-        // Loop through transactions to identify outbound transfers to other wallets
         for (const sigInfo of fundingTxHistory) {
+          if (!sigInfo?.signature) continue;
           const tx = await solanaRpcRequest('getTransaction', [
             sigInfo.signature,
             { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0 }
           ]);
 
-          if (tx && tx.transaction) {
-            const keys = tx.transaction.message.accountKeys.map(k => k.pubkey || k);
-            // Search for outbound fund pathways
+          if (tx?.transaction?.message?.accountKeys) {
+            const keys = tx.transaction.message.accountKeys.map(k => k?.pubkey || k);
             keys.forEach(key => {
-              if (key !== report.genesisFundingWallet && key !== report.creatorAddress && key.length >= 32) {
+              if (key && key !== report.genesisFundingWallet && key !== report.creatorAddress && key.length >= 32) {
                 associatedDeployers.add(key);
               }
             });
           }
-          if (associatedDeployers.size >= 5) break; // Limit API load
+          if (associatedDeployers.size >= 4) break; 
         }
 
         if (associatedDeployers.size > 0) {
@@ -149,6 +136,7 @@ export async function traceSolanaTokenForensics(mintAddress) {
 
   } catch (error) {
     report.errors.push(error.message);
+    console.error('Forensics Engine Error:', error.message);
   }
 
   return report;

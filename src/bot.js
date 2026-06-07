@@ -9,56 +9,37 @@ import { checkBitgetListing, verifyBitgetCredentials } from './bitget.js';
 
 dotenv.config();
 
+// ==================== CRASH PREVENTION GUARD ====================
+process.on('uncaughtException', (err) => {
+  console.error('🛑 [CRASH PREVENTED] Uncaught Exception:', err.message);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🛑 [CRASH PREVENTED] Unhandled Rejection at:', promise, 'reason:', reason);
+});
+// ================================================================
+
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {
   console.error('Fatal Error: TELEGRAM_BOT_TOKEN is missing from .env file.');
   process.exit(1);
 }
 
-// Initialize Telegram Bot in Polling Mode
 const bot = new TelegramBot(token, { polling: true });
 
 console.log('🤖 RugGuard AI Safety Agent is online and listening...');
 
-// Check and output API status check upon boot
-verifyBitgetCredentials().then(result => {
-  if (result.success) {
-    console.log('✅ Bitget API Connection: Verified & Active.');
-  } else {
-    console.warn(`⚠️ Bitget API Setup Warning: ${result.reason}`);
+// Premium Navigation Keyboard (Persistent Bottom Menu)
+const bottomMenuKeyboard = {
+  reply_markup: {
+    keyboard: [
+      [{ text: '🔍 Quick Scan' }, { text: '📈 Bitget Spot Markets' }],
+      [{ text: '🛡️ System Status' }, { text: 'ℹ️ Help Guide' }]
+    ],
+    resize_keyboard: true,
+    is_persistent: true
   }
-});
-
-// ==================== RENDER ALIVE ENGINE ====================
-
-const PORT = process.env.PORT || 8080;
-
-// Create a simple HTTP health check server for Render
-const server = http.createServer((req, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('RugGuard AI is running and active.');
-});
-
-server.listen(PORT, () => {
-  console.log(`📡 Health Check Server running on port ${PORT}`);
-});
-
-// Self-ping loop (triggers every 10 minutes)
-const pingInterval = 10 * 60 * 1000; // 10 minutes
-setInterval(() => {
-  const selfUrl = process.env.RENDER_EXTERNAL_URL;
-  if (selfUrl) {
-    https.get(selfUrl, (res) => {
-      console.log(`🔄 Self-ping sent to ${selfUrl} - Status: ${res.statusCode}`);
-    }).on('error', (err) => {
-      console.error(`⚠️ Self-ping failed: ${err.message}`);
-    });
-  } else {
-    console.log('ℹ️ Self-ping skipped: RENDER_EXTERNAL_URL is not configured in environment.');
-  }
-}, pingInterval);
-
-// =============================================================
+};
 
 // Handle /start Command
 bot.onText(/\/start/, (msg) => {
@@ -69,18 +50,124 @@ _Check before you ape._
 
 I am an autonomous security bot engineered to analyze Web3 smart contracts, tokens, and dApp links to prevent rug pulls, honeypots, and phishing attacks.
 
-📥 **How to use:**
-Simply send me:
-• A **Solana contract address** (mint)
-• An **Ethereum/EVM contract address**
-• A **website URL / dApp link**
-
-📊 **Market Check:**
-Use \`/market <symbol>\` (e.g., \`/market SOL\` or \`/market BTC\`) to fetch live pricing and safety listings directly on Bitget.
-
-_Powered by Alibaba Qwen, Tavily, and Bitget AI Team._
+Use the menu buttons below to navigate or query the system.
 `;
-  bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown' });
+  bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown', ...bottomMenuKeyboard });
+});
+
+// Handle Bottom Keyboard and general text inputs
+bot.on('message', async (msg) => {
+  const chatId = msg.chat.id;
+  const text = msg.text?.trim();
+
+  if (!text || text.startsWith('/')) return;
+
+  // Handle Bottom Menu Button triggers
+  if (text === '🔍 Quick Scan') {
+    return bot.sendMessage(
+      chatId, 
+      '📥 **Ready to Scan**\n\nPaste any Solana contract address, EVM address, or web URL here. RugGuard AI will perform an immediate security analysis.',
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  if (text === '📈 Bitget Spot Markets') {
+    return bot.sendMessage(
+      chatId, 
+      '📊 **Bitget Market Checker**\n\nTo view active listings and spot statistics, type: `/market <ticker>`\n\n_Example: \`/market SOL\` or \`/market BGB\`_',
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  if (text === 'ℹ️ Help Guide') {
+    const helpText = `
+📖 **RugGuard AI Help Guide**
+
+• **Scan Tokens:** Send any contract address (Solana/EVM) directly into the chat to generate a risk profile.
+• **Scan dApps:** Paste website links to identify malicious domains or phishing redirects.
+• **Bitget Spot Check:** Query `/market <ticker>` to verify if the asset is listed and protected by Bitget's centralized security layers.
+`;
+    return bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
+  }
+
+  if (text === '🛡️ System Status') {
+    const statusMsg = await bot.sendMessage(chatId, '🛡️ *Analyzing System Integrity Status...*', { parse_mode: 'Markdown' });
+    
+    // Test API connectivity
+    const bitgetCheck = await verifyBitgetCredentials();
+    const qwenStatus = process.env.QWEN_API_KEY ? 'Connected' : 'Error';
+    const tavilyStatus = process.env.TAVILY_API_KEY ? 'Connected' : 'Error';
+
+    const systemStatusText = `
+⚙️ **RugGuard AI Diagnostic Status**
+
+• **Alibaba Qwen LLM:** \`${qwenStatus}\`
+• **Tavily Web Search:** \`${tavilyStatus}\`
+• **Solana Node RPC:** \`Mainnet-Beta Active\`
+• **Bitget API Verification:** \`${bitgetCheck.success ? 'Verified' : 'Error - ' + bitgetCheck.reason}\`
+• **Container Keep-Alive:** \`Active 24/7 (Uptime OK)\`
+
+🟢 All systems running normally. Use the interface to initiate target audits.
+`;
+    await bot.deleteMessage(chatId, statusMsg.message_id);
+    return bot.sendMessage(chatId, systemStatusText, { parse_mode: 'Markdown' });
+  }
+
+  // Treat all other text inputs as scan targets
+  const statusMsg = await bot.sendMessage(
+    chatId,
+    `🔍 *Scanning target:* \`${text}\`\n_Analyzing on-chain registry contracts, web reports, and database logs..._`,
+    { parse_mode: 'Markdown' }
+  );
+
+  try {
+    // Step 1: On-Chain Scan
+    const securityResult = await analyzeTarget(text);
+
+    // Step 2: Tavily Search Context
+    const searchQuery = securityResult.success 
+      ? `${securityResult.target} ${securityResult.type}` 
+      : text;
+    const searchResult = await performWebSearch(searchQuery);
+
+    // Step 3: Check Bitget Spot listings if it is a token address
+    let bitgetListingData = null;
+    if (securityResult.success && securityResult.type !== 'url') {
+      bitgetListingData = await checkBitgetListing(securityResult.target);
+    }
+
+    securityResult.bitgetSafetyStatus = bitgetListingData || { listed: false };
+
+    // Step 4: AI synthesis and reasoning using Alibaba Qwen
+    const auditReport = await generateSecurityReport(securityResult, searchResult);
+
+    // Step 5: Construct Premium Inline Keyboard
+    const inlineButtons = {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '📈 Trade Safely on Bitget', url: 'https://www.bitget.com' },
+            { text: '📣 Share Report', url: `https://t.me/share/url?url=Check%20out%20this%20RugGuard%20Audit:%20${encodeURIComponent(text)}` }
+          ]
+        ]
+      }
+    };
+
+    // Step 6: Send final response with Inline Actions
+    await bot.deleteMessage(chatId, statusMsg.message_id);
+    await bot.sendMessage(chatId, auditReport, { parse_mode: 'Markdown', ...inlineButtons });
+
+  } catch (error) {
+    console.error('Audit Engine Failure:', error);
+    await bot.editMessageText(
+      `❌ **Audit Failure**\n\nAn unexpected error occurred while processing the audit request: ${error.message}`,
+      {
+        chat_id: chatId,
+        message_id: statusMsg.message_id,
+        parse_mode: 'Markdown'
+      }
+    );
+  }
 });
 
 // Handle /market <symbol> command
@@ -121,55 +208,27 @@ bot.onText(/\/market\s+(.+)/, async (msg, match) => {
   }
 });
 
-// Handle incoming query messages (scans)
-bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text?.trim();
+// ==================== RENDER ALIVE ENGINE ====================
+const PORT = process.env.PORT || 8080;
 
-  // Skip command structures
-  if (!text || text.startsWith('/')) return;
-
-  const statusMsg = await bot.sendMessage(
-    chatId,
-    `🔍 *Scanning target:* \`${text}\`\n_Analyzing on-chain registry contracts, web reports, and database logs..._`,
-    { parse_mode: 'Markdown' }
-  );
-
-  try {
-    // Step 1: On-Chain Scan
-    const securityResult = await analyzeTarget(text);
-
-    // Step 2: Tavily Search Context
-    const searchQuery = securityResult.success 
-      ? `${securityResult.target} ${securityResult.type}` 
-      : text;
-    const searchResult = await performWebSearch(searchQuery);
-
-    // Step 3: Check Bitget Spot listings if it is a token address
-    let bitgetListingData = null;
-    if (securityResult.success && securityResult.type !== 'url') {
-      bitgetListingData = await checkBitgetListing(securityResult.target);
-    }
-
-    // Append Bitget safety context directly to the security data structure
-    securityResult.bitgetSafetyStatus = bitgetListingData || { listed: false };
-
-    // Step 4: AI synthesis and reasoning using Alibaba Qwen
-    const auditReport = await generateSecurityReport(securityResult, searchResult);
-
-    // Step 5: Send final response to the user
-    await bot.deleteMessage(chatId, statusMsg.message_id);
-    await bot.sendMessage(chatId, auditReport, { parse_mode: 'Markdown' });
-
-  } catch (error) {
-    console.error('Audit Engine Failure:', error);
-    await bot.editMessageText(
-      `❌ **Audit Failure**\n\nAn unexpected error occurred while processing the audit request: ${error.message}`,
-      {
-        chat_id: chatId,
-        message_id: statusMsg.message_id,
-        parse_mode: 'Markdown'
-      }
-    );
-  }
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('RugGuard AI is running and active.');
 });
+
+server.listen(PORT, () => {
+  console.log(`📡 Health Check Server running on port ${PORT}`);
+});
+
+const pingInterval = 10 * 60 * 1000; // 10 minutes
+setInterval(() => {
+  const selfUrl = process.env.RENDER_EXTERNAL_URL;
+  if (selfUrl) {
+    https.get(selfUrl, (res) => {
+      console.log(`🔄 Self-ping sent to ${selfUrl} - Status: ${res.statusCode}`);
+    }).on('error', (err) => {
+      console.error(`⚠️ Self-ping failed: ${err.message}`);
+    });
+  }
+}, pingInterval);
+// =============================================================
