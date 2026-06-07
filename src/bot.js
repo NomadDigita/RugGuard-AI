@@ -57,42 +57,55 @@ const getAlertsInlineMarkup = () => {
   };
 };
 
-// Handle /start Command
-bot.onText(/\/start/, (msg) => {
+// Handle /start Command (Modified to prevent Reply Markup Collisions)
+bot.onText(/\/start/, async (msg) => {
   const chatId = msg.chat.id;
+
   const welcomeMessage = `
 🛡️ **Welcome to RugGuard AI Safety Agent** 🛡️
 _Check before you ape._
 
 I am an autonomous security bot engineered to analyze Web3 smart contracts, tokens, and dApp links to prevent rug pulls, honeypots, and phishing attacks.
-
-🔔 **Live Alerts Subscription:**
-Subscribe to our 24/7 background scanner using the interactive buttons below to receive instant warnings when unverified/malicious on-chain activity is identified.
 `;
-  bot.sendMessage(chatId, welcomeMessage, { 
-    parse_mode: 'Markdown', 
-    reply_markup: getAlertsInlineMarkup(),
-    ...bottomMenuKeyboard 
-  });
+
+  const alertControlMessage = `
+🔔 **Live Alerts Control Panel**
+Toggle our 24/7 background scanner below. You will receive instant warnings when suspicious trading pools or contract manipulations are detected.
+`;
+
+  try {
+    // 1. Send welcome message and initialize the bottom persistent menu
+    await bot.sendMessage(chatId, welcomeMessage, { 
+      parse_mode: 'Markdown', 
+      ...bottomMenuKeyboard 
+    });
+
+    // 2. Send the interactive inline buttons as a separate control card
+    await bot.sendMessage(chatId, alertControlMessage, {
+      parse_mode: 'Markdown',
+      reply_markup: getAlertsInlineMarkup()
+    });
+  } catch (error) {
+    console.error('Start Command Error:', error.message);
+  }
 });
 
 // ==================== CALLBACK QUERY LISTENER (INLINE ACTIONS) ====================
 bot.on('callback_query', async (query) => {
   const chatId = query.message.chat.id;
-  const messageId = query.message.message_id;
   const action = query.data;
 
   try {
     if (action === 'toggle_alerts_on') {
       alertSubscribers.add(chatId);
       await bot.answerCallbackQuery(query.id, { text: 'Subscribed to Live Alerts!', show_alert: false });
-      await bot.sendMessage(chatId, '🔔 **Live Alerts: Subscribed**\n\nI will now monitor trending pairs on Solana/EVM every 5 minutes and alert you if a security risk is identified.', { parse_mode: 'Markdown' });
+      await bot.sendMessage(chatId, '🔔 **Live Alerts: Subscribed**\n\nBackground monitoring active. I am scanning pools every 5 minutes.', { parse_mode: 'Markdown' });
     }
 
     if (action === 'toggle_alerts_off') {
       alertSubscribers.delete(chatId);
       await bot.answerCallbackQuery(query.id, { text: 'Unsubscribed from Live Alerts.', show_alert: false });
-      await bot.sendMessage(chatId, '🔕 **Live Alerts: Unsubscribed**\n\nYou will no longer receive background monitoring alerts.', { parse_mode: 'Markdown' });
+      await bot.sendMessage(chatId, '🔕 **Live Alerts: Unsubscribed**\n\nBackground monitoring deactivated.', { parse_mode: 'Markdown' });
     }
   } catch (error) {
     console.error('Callback Query Processing Error:', error.message);
@@ -200,7 +213,6 @@ bot.on('message', async (msg) => {
     const targetDisplay = text.substring(0, 10) + '...';
     const gaugeUrl = generateSecurityGaugeUrl(score, targetDisplay);
 
-    // Formulate a clean, Web2-friendly summary card for the Image Caption
     const summaryCaption = `
 🛡️ **RUGGUARD AI SECURITY AUDIT REPORT**
 • **Target:** \`${text}\`
