@@ -33,11 +33,12 @@ const alertSubscribers = new Set();
 
 console.log('🤖 RugGuard AI Safety Agent is online and listening...');
 
-// Persistent Bottom Menu Layout
+// Persistent Bottom Menu Layout with Integrated Alerts
 const bottomMenuKeyboard = {
   reply_markup: {
     keyboard: [
       [{ text: '🔍 Quick Scan' }, { text: '📈 Bitget Spot Markets' }],
+      [{ text: '🔔 Enable Alerts' }, { text: '🔕 Disable Alerts' }],
       [{ text: '🛡️ System Status' }, { text: 'ℹ️ Help Guide' }]
     ],
     resize_keyboard: true,
@@ -45,73 +46,19 @@ const bottomMenuKeyboard = {
   }
 };
 
-// Returns interactive inline buttons for managing alerts
-const getAlertsInlineMarkup = () => {
-  return {
-    inline_keyboard: [
-      [
-        { text: '🔔 Turn Alerts ON', callback_data: 'toggle_alerts_on' },
-        { text: '🔕 Turn Alerts OFF', callback_data: 'toggle_alerts_off' }
-      ]
-    ]
-  };
-};
-
-// Handle /start Command (Modified to prevent Reply Markup Collisions)
-bot.onText(/\/start/, async (msg) => {
+// Handle /start Command
+bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
-
   const welcomeMessage = `
 🛡️ **Welcome to RugGuard AI Safety Agent** 🛡️
 _Check before you ape._
 
 I am an autonomous security bot engineered to analyze Web3 smart contracts, tokens, and dApp links to prevent rug pulls, honeypots, and phishing attacks.
+
+📥 Use the bottom persistent menu to scan targets, monitor markets, or manage your security alerts.
 `;
-
-  const alertControlMessage = `
-🔔 **Live Alerts Control Panel**
-Toggle our 24/7 background scanner below. You will receive instant warnings when suspicious trading pools or contract manipulations are detected.
-`;
-
-  try {
-    // 1. Send welcome message and initialize the bottom persistent menu
-    await bot.sendMessage(chatId, welcomeMessage, { 
-      parse_mode: 'Markdown', 
-      ...bottomMenuKeyboard 
-    });
-
-    // 2. Send the interactive inline buttons as a separate control card
-    await bot.sendMessage(chatId, alertControlMessage, {
-      parse_mode: 'Markdown',
-      reply_markup: getAlertsInlineMarkup()
-    });
-  } catch (error) {
-    console.error('Start Command Error:', error.message);
-  }
+  bot.sendMessage(chatId, welcomeMessage, { parse_mode: 'Markdown', ...bottomMenuKeyboard });
 });
-
-// ==================== CALLBACK QUERY LISTENER (INLINE ACTIONS) ====================
-bot.on('callback_query', async (query) => {
-  const chatId = query.message.chat.id;
-  const action = query.data;
-
-  try {
-    if (action === 'toggle_alerts_on') {
-      alertSubscribers.add(chatId);
-      await bot.answerCallbackQuery(query.id, { text: 'Subscribed to Live Alerts!', show_alert: false });
-      await bot.sendMessage(chatId, '🔔 **Live Alerts: Subscribed**\n\nBackground monitoring active. I am scanning pools every 5 minutes.', { parse_mode: 'Markdown' });
-    }
-
-    if (action === 'toggle_alerts_off') {
-      alertSubscribers.delete(chatId);
-      await bot.answerCallbackQuery(query.id, { text: 'Unsubscribed from Live Alerts.', show_alert: false });
-      await bot.sendMessage(chatId, '🔕 **Live Alerts: Unsubscribed**\n\nBackground monitoring deactivated.', { parse_mode: 'Markdown' });
-    }
-  } catch (error) {
-    console.error('Callback Query Processing Error:', error.message);
-  }
-});
-// =================================================================================
 
 // Handle Bottom Keyboard and general text inputs
 bot.on('message', async (msg) => {
@@ -137,18 +84,33 @@ bot.on('message', async (msg) => {
     );
   }
 
+  if (text === '🔔 Enable Alerts') {
+    alertSubscribers.add(chatId);
+    return bot.sendMessage(
+      chatId,
+      '🔔 **RugGuard Live Alerts: Enabled**\n\nI will now scan trending contracts every 5 minutes and alert you immediately here if a security risk is detected.',
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  if (text === '🔕 Disable Alerts') {
+    alertSubscribers.delete(chatId);
+    return bot.sendMessage(
+      chatId,
+      '🔕 **RugGuard Live Alerts: Disabled**\n\nBackground monitoring has been deactivated. You will no longer receive automated notifications.',
+      { parse_mode: 'Markdown' }
+    );
+  }
+
   if (text === 'ℹ️ Help Guide') {
     const helpText = `
 📖 **RugGuard AI Help Guide**
 
 • **Scan Tokens:** Send any contract address (Solana/EVM) directly into the chat to generate a risk profile.
 • **Scan dApps:** Paste website links to identify malicious domains or phishing redirects.
-• **Live Alerts:** Toggle monitoring instantly using the subscription buttons below.
+• **Live Alerts:** Turn alerts on or off directly using the buttons in your bottom menu.
 `;
-    return bot.sendMessage(chatId, helpText, { 
-      parse_mode: 'Markdown',
-      reply_markup: getAlertsInlineMarkup()
-    });
+    return bot.sendMessage(chatId, helpText, { parse_mode: 'Markdown' });
   }
 
   if (text === '🛡️ System Status') {
@@ -168,13 +130,10 @@ bot.on('message', async (msg) => {
 • **Active Subscribers:** \`${alertSubscribers.size} chats\`
 • **Container Keep-Alive:** \`Active 24/7 (Uptime OK)\`
 
-🟢 All systems running normally. Toggle your alert subscriptions below:
+🟢 All systems running normally. Use the bottom menu to toggle subscriptions or trigger scans.
 `;
     await bot.deleteMessage(chatId, statusMsg.message_id);
-    return bot.sendMessage(chatId, systemStatusText, { 
-      parse_mode: 'Markdown',
-      reply_markup: getAlertsInlineMarkup()
-    });
+    return bot.sendMessage(chatId, systemStatusText, { parse_mode: 'Markdown' });
   }
 
   // Treat all other text inputs as scan targets
@@ -222,25 +181,13 @@ bot.on('message', async (msg) => {
 _Deep on-chain analysis and forensic trace completed successfully. The complete, un-truncated report has been compiled and sent below._
 `;
 
-    const inlineButtons = {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '📈 Trade Safely on Bitget', url: 'https://www.bitget.com' },
-            { text: '📣 Share Report', url: `https://t.me/share/url?url=Check%20out%20this%20RugGuard%20Audit:%20${encodeURIComponent(text)}` }
-          ]
-        ]
-      }
-    };
-
     await bot.deleteMessage(chatId, statusMsg.message_id);
 
     // === Split-Message Delivery ===
     // 1. Send Visual Gauge with high-impact Web2 summary card
     await bot.sendPhoto(chatId, gaugeUrl, {
       caption: summaryCaption,
-      parse_mode: 'Markdown',
-      ...inlineButtons
+      parse_mode: 'Markdown'
     });
 
     // 2. Instantly follow up with the complete, detailed AI report
@@ -284,26 +231,15 @@ bot.onText(/\/market\s+(.+)/, async (msg, match) => {
 🛡️ *Trading listed assets on institutional platforms like Bitget reduces standard smart-contract vulnerability risks.*
 `;
 
-      const inlineButtons = {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '📊 Trade on Bitget', url: `https://www.bitget.com/spot/${targetSymbol}USDT` }
-            ]
-          ]
-        }
-      };
-
       await bot.deleteMessage(chatId, statusMsg.message_id);
 
       if (chartUrl) {
         await bot.sendPhoto(chatId, chartUrl, {
           caption: responseText,
-          parse_mode: 'Markdown',
-          ...inlineButtons
+          parse_mode: 'Markdown'
         });
       } else {
-        await bot.sendMessage(chatId, responseText, { parse_mode: 'Markdown', ...inlineButtons });
+        await bot.sendMessage(chatId, responseText, { parse_mode: 'Markdown' });
       }
 
     } else {
@@ -359,13 +295,11 @@ _Coordinated Scam / Malicious Activity Detected in Trending Pools_
 `;
 
           for (const chatId of alertSubscribers) {
-            // Send Gauge + Summary Card
             await bot.sendPhoto(chatId, alertGaugeUrl, {
               caption: alertSummary,
               parse_mode: 'Markdown'
             });
 
-            // Send full detailed audit following the alert card
             await bot.sendMessage(chatId, auditReport, { parse_mode: 'Markdown' });
           }
         }
