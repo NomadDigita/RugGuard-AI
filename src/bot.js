@@ -46,13 +46,55 @@ const bottomMenuKeyboard = {
   }
 };
 
-// Fail-safe sender utility: if Markdown parsing fails, falls back to raw text
+// Advanced Fail-Safe Sender: Handles both Markdown errors AND the 4,096-character Telegram limit
 async function sendSafeMessage(chatId, text) {
-  try {
-    await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
-  } catch (error) {
-    console.warn('⚠️ Markdown parsing failed, sending in plain-text mode as fallback:', error.message);
-    await bot.sendMessage(chatId, text); // Send without parse_mode
+  if (!text) return;
+
+  const maxChunkLength = 3900; // Safe threshold slightly below the 4,096 limit
+
+  // If text is within normal limits, send it directly
+  if (text.length <= maxChunkLength) {
+    try {
+      await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+    } catch (error) {
+      console.warn('⚠️ Markdown parsing failed, sending raw fallback:', error.message);
+      await bot.sendMessage(chatId, text);
+    }
+    return;
+  }
+
+  // If text exceeds the limit, split it cleanly at paragraph boundaries
+  console.log(`📡 Splitting long report (${text.length} characters) into safe chunks...`);
+  const chunks = [];
+  let remainingText = text;
+
+  while (remainingText.length > 0) {
+    if (remainingText.length <= maxChunkLength) {
+      chunks.push(remainingText);
+      break;
+    }
+
+    // Attempt to find a clean newline to split, preventing broken words or tables
+    let splitIndex = remainingText.lastIndexOf('\n', maxChunkLength);
+    if (splitIndex === -1) {
+      splitIndex = remainingText.lastIndexOf(' ', maxChunkLength);
+    }
+    if (splitIndex === -1 || splitIndex < 2000) {
+      splitIndex = maxChunkLength; // Hard cut if no clean space is found
+    }
+
+    chunks.push(remainingText.substring(0, splitIndex));
+    remainingText = remainingText.substring(splitIndex);
+  }
+
+  // Sequentially send each formatted chunk
+  for (let i = 0; i < chunks.length; i++) {
+    try {
+      await bot.sendMessage(chatId, chunks[i], { parse_mode: 'Markdown' });
+    } catch (error) {
+      console.warn(`⚠️ Chunk ${i + 1} Markdown failed, sending raw fallback.`);
+      await bot.sendMessage(chatId, chunks[i]);
+    }
   }
 }
 
@@ -130,7 +172,7 @@ bot.on('message', async (msg) => {
     const qwenStatus = process.env.QWEN_API_KEY ? 'Connected' : 'Error';
     const tavilyStatus = process.env.TAVILY_API_KEY ? 'Connected' : 'Error';
 
-    // Query active Solana performance metrics directly from the mainnet RPC
+    // Query active Solana performance metrics
     let solanaTps = 'Active';
     try {
       const response = await axios.post('https://api.mainnet-beta.solana.com', {
@@ -209,7 +251,6 @@ bot.on('message', async (msg) => {
 _Deep on-chain analysis and forensic trace completed successfully. The complete, un-truncated report has been compiled and sent below._
 `;
 
-    // Restored the static inline URL buttons for institutional actions
     const inlineButtons = {
       reply_markup: {
         inline_keyboard: [
@@ -231,7 +272,7 @@ _Deep on-chain analysis and forensic trace completed successfully. The complete,
       ...inlineButtons
     });
 
-    // 2. Instantly follow up with the complete, detailed AI report using fail-safe sender
+    // 2. Instantly follow up with the complete, detailed AI report using fail-safe splitter
     await sendSafeMessage(chatId, auditReport);
 
   } catch (error) {
@@ -272,7 +313,6 @@ bot.onText(/\/market\s+(.+)/, async (msg, match) => {
 🛡️ *Trading listed assets on institutional platforms like Bitget reduces standard smart-contract vulnerability risks.*
 `;
 
-      // Restored the static inline "Trade on Bitget" button for live listings
       const inlineButtons = {
         reply_markup: {
           inline_keyboard: [
