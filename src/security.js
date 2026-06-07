@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { traceSolanaTokenForensics } from './forensics.js';
 
 /**
  * Checks if the string matches a standard EVM wallet/token address
@@ -51,30 +52,40 @@ async function checkDappSecurity(url) {
 }
 
 /**
- * Scans a Solana token mint address for Rug Pull indicators
+ * Scans a Solana token mint address, integrating GoPlus + Developer Forensics Engine
  */
 async function checkSolanaToken(address) {
   try {
+    // 1. Fetch GoPlus contract metadata
     const response = await axios.get(`https://api.gopluslabs.io/api/v1/solana/token_security`, {
       params: { addresses: address }
     });
 
+    let goplusData = {};
     if (response.data && response.data.result && response.data.result[address]) {
-      const data = response.data.result[address];
-      return {
-        type: 'solana_token',
-        target: address,
-        success: true,
-        data: {
-          mintable: data.mintable || '0', // "1" means mint authority exists (high risk)
-          freezable: data.freezable || '0', // "1" means creator can freeze transfers
-          owner: data.owner || 'None',
-          creatorAddress: data.creator_address || 'Unknown',
-          topHolders: data.holders || []
-        }
-      };
+      goplusData = response.data.result[address];
     }
-    throw new Error('No Solana contract registry data found.');
+
+    // 2. Perform advanced Dev Wallet Forensics and Sybil Cluster Tracking
+    const forensics = await traceSolanaTokenForensics(address);
+
+    return {
+      type: 'solana_token',
+      target: address,
+      success: true,
+      data: {
+        mintable: goplusData.mintable || (forensics.hasMintAuthority ? '1' : '0'),
+        freezable: goplusData.freezable || (forensics.hasFreezeAuthority ? '1' : '0'),
+        owner: goplusData.owner || forensics.creatorAddress || 'None',
+        creatorAddress: forensics.creatorAddress || goplusData.creator_address || 'Unknown',
+        topHolders: goplusData.holders || [],
+        
+        // Advanced Sybil Forensics Data
+        genesisFundingSource: forensics.genesisFundingWallet || 'Direct/Unknown',
+        isSybilCluster: forensics.isSybilClusterDetected,
+        scamClusterAddresses: forensics.scamClusterAssociations
+      }
+    };
   } catch (error) {
     return { type: 'solana_token', target: address, success: false, error: error.message };
   }
@@ -82,7 +93,6 @@ async function checkSolanaToken(address) {
 
 /**
  * Scans an EVM (Ethereum / BSC) token address for honeypots and bad structures
- * Defaulting to Ethereum (chain_id: '1')
  */
 async function checkEVMToken(address, chainId = '1') {
   try {
@@ -131,7 +141,6 @@ export async function analyzeTarget(input) {
   }
 
   if (isEVMAddress(target)) {
-    // If it looks like EVM, analyze on Ethereum. Can expand to other chain IDs later if needed.
     return await checkEVMToken(target, '1');
   }
 
