@@ -30,7 +30,7 @@ if (!token) {
 
 const bot = new TelegramBot(token, { polling: true });
 
-// ==================== PERSISTENT SUBSCRIBERS REPO ====================
+// Active alert subscription registry (in-memory)
 const SUBSCRIBERS_FILE = path.join(process.cwd(), 'subscribers.json');
 let alertSubscribers = new Set();
 
@@ -64,7 +64,7 @@ loadSubscribers();
 
 console.log('🤖 RugGuard AI Safety Agent is online and listening...');
 
-// Persistent Bottom Menu Layout (Removed is_persistent to restore the Dice/Toggle button)
+// Persistent Bottom Menu Layout
 const bottomMenuKeyboard = {
   reply_markup: {
     keyboard: [
@@ -76,7 +76,7 @@ const bottomMenuKeyboard = {
   }
 };
 
-// Fail-safe sender: splits long text messages
+// Advanced Fail-Safe Sender: Handles both Markdown errors AND the 4,096-character Telegram limit
 async function sendSafeMessage(chatId, text) {
   if (!text) return;
   const maxChunkLength = 3900;
@@ -160,7 +160,7 @@ bot.on('message', async (msg) => {
 
   if (text === '🔔 Enable Alerts') {
     alertSubscribers.add(chatId);
-    saveSubscribers(); // Write to persistent storage
+    saveSubscribers();
     return bot.sendMessage(
       chatId,
       '🔔 **RugGuard Live Alerts: Enabled**\n\nI will now scan trending contracts every 5 minutes and alert you immediately here if a security risk is detected.',
@@ -170,7 +170,7 @@ bot.on('message', async (msg) => {
 
   if (text === '🔕 Disable Alerts') {
     alertSubscribers.delete(chatId);
-    saveSubscribers(); // Write to persistent storage
+    saveSubscribers();
     return bot.sendMessage(
       chatId,
       '🔕 **RugGuard Live Alerts: Disabled**\n\nBackground monitoring has been deactivated. You will no longer receive automated notifications.',
@@ -238,23 +238,31 @@ bot.on('message', async (msg) => {
   );
 
   try {
+    // Step 1: On-Chain Scan
     const securityResult = await analyzeTarget(text);
+
+    // Step 2: Tavily Search Context
     const searchQuery = securityResult.success 
       ? `${securityResult.target} ${securityResult.type}` 
       : text;
     const searchResult = await performWebSearch(searchQuery);
 
+    // Step 3: Check Bitget Spot listings if it is a token address
     let bitgetListingData = null;
     if (securityResult.success && securityResult.type !== 'url') {
       bitgetListingData = await checkBitgetListing(securityResult.target);
     }
 
     securityResult.bitgetSafetyStatus = bitgetListingData || { listed: false };
+
+    // Step 4: AI synthesis and reasoning using Alibaba Qwen
     const auditReport = await generateSecurityReport(securityResult, searchResult);
 
-    const scoreMatch = auditReport.match(/RISK SCORE:\s*(\d+)/i);
+    // Step 5: Extract dynamic risk score using the robust layout-independent regex
+    const scoreMatch = auditReport.match(/(\d+)\s*\/\s*100/);
     const score = scoreMatch ? parseInt(scoreMatch[1]) : 50;
 
+    // Generate dynamic security gauge
     const targetDisplay = text.substring(0, 10) + '...';
     const gaugeUrl = generateSecurityGaugeUrl(score, targetDisplay);
 
@@ -267,13 +275,28 @@ bot.on('message', async (msg) => {
 _Deep on-chain analysis and forensic trace completed successfully. The complete, un-truncated report has been compiled and sent below._
 `;
 
+    const inlineButtons = {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '📈 Trade Safely on Bitget', url: 'https://www.bitget.com' },
+            { text: '📣 Share Report', url: `https://t.me/share/url?url=Check%20out%20this%20RugGuard%20Audit:%20${encodeURIComponent(text)}` }
+          ]
+        ]
+      }
+    };
+
     await bot.deleteMessage(chatId, statusMsg.message_id);
 
+    // === Split-Message Delivery ===
+    // 1. Send Visual Gauge with high-impact Web2 summary card
     await bot.sendPhoto(chatId, gaugeUrl, {
       caption: summaryCaption,
-      parse_mode: 'Markdown'
+      parse_mode: 'Markdown',
+      ...inlineButtons
     });
 
+    // 2. Instantly follow up with the complete, detailed AI report using fail-safe splitter
     await sendSafeMessage(chatId, auditReport);
 
   } catch (error) {
@@ -314,15 +337,26 @@ bot.onText(/\/market\s+(.+)/, async (msg, match) => {
 🛡️ *Trading listed assets on institutional platforms like Bitget reduces standard smart-contract vulnerability risks.*
 `;
 
+      const inlineButtons = {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '📊 Trade on Bitget', url: `https://www.bitget.com/spot/${targetSymbol}USDT` }
+            ]
+          ]
+        }
+      };
+
       await bot.deleteMessage(chatId, statusMsg.message_id);
 
       if (chartUrl) {
         await bot.sendPhoto(chatId, chartUrl, {
           caption: responseText,
-          parse_mode: 'Markdown'
+          parse_mode: 'Markdown',
+          ...inlineButtons
         });
       } else {
-        await bot.sendMessage(chatId, responseText, { parse_mode: 'Markdown' });
+        await bot.sendMessage(chatId, responseText, { parse_mode: 'Markdown', ...inlineButtons });
       }
 
     } else {
@@ -353,7 +387,6 @@ setInterval(async () => {
         const address = targetToken.tokenAddress;
         const symbol = targetToken.symbol || 'UNKNOWN';
 
-        // Passes the specific chainName (e.g. solana, bsc, ethereum) to route GoPlus properly
         const securityResult = await analyzeTarget(address, targetToken.chainId);
         const searchResult = await performWebSearch(`${symbol} ${address}`);
         
@@ -361,7 +394,7 @@ setInterval(async () => {
 
         const auditReport = await generateSecurityReport(securityResult, searchResult);
 
-        const scoreMatch = auditReport.match(/RISK SCORE:\s*(\d+)/i);
+        const scoreMatch = auditReport.match(/(\d+)\s*\/\s*100/);
         const score = scoreMatch ? parseInt(scoreMatch[1]) : 50;
 
         // Broadcast if highly critical / high confidence rug risk (score < 15)
