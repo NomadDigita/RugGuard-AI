@@ -3,6 +3,8 @@ import dotenv from 'dotenv';
 import http from 'http';
 import https from 'https';
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 import { analyzeTarget } from './security.js';
 import { performWebSearch } from './search.js';
 import { generateSecurityReport } from './ai.js';
@@ -28,12 +30,41 @@ if (!token) {
 
 const bot = new TelegramBot(token, { polling: true });
 
-// Active alert subscription registry (in-memory)
-const alertSubscribers = new Set();
+// ==================== PERSISTENT SUBSCRIBERS REPO ====================
+const SUBSCRIBERS_FILE = path.join(process.cwd(), 'subscribers.json');
+let alertSubscribers = new Set();
+
+// Load subscribers from local file upon boot
+function loadSubscribers() {
+  try {
+    if (fs.existsSync(SUBSCRIBERS_FILE)) {
+      const data = fs.readFileSync(SUBSCRIBERS_FILE, 'utf8');
+      const list = JSON.parse(data);
+      alertSubscribers = new Set(list);
+      console.log(`💾 Loaded ${alertSubscribers.size} subscribers from storage.`);
+    }
+  } catch (error) {
+    console.error('Failed to load subscriber storage:', error.message);
+  }
+}
+
+// Save subscribers list to local file
+function saveSubscribers() {
+  try {
+    const list = Array.from(alertSubscribers);
+    fs.writeFileSync(SUBSCRIBERS_FILE, JSON.stringify(list), 'utf8');
+    console.log('💾 Subscriber list saved successfully.');
+  } catch (error) {
+    console.error('Failed to write subscriber storage:', error.message);
+  }
+}
+
+loadSubscribers();
+// =========================================================================
 
 console.log('🤖 RugGuard AI Safety Agent is online and listening...');
 
-// Persistent Bottom Menu Layout
+// Persistent Bottom Menu Layout (Removed is_persistent to restore the Dice/Toggle button)
 const bottomMenuKeyboard = {
   reply_markup: {
     keyboard: [
@@ -41,30 +72,24 @@ const bottomMenuKeyboard = {
       [{ text: '🔔 Enable Alerts' }, { text: '🔕 Disable Alerts' }],
       [{ text: '🛡️ System Status' }, { text: 'ℹ️ Help Guide' }]
     ],
-    resize_keyboard: true,
-    is_persistent: true
+    resize_keyboard: true
   }
 };
 
-// Advanced Fail-Safe Sender: Handles both Markdown errors AND the 4,096-character Telegram limit
+// Fail-safe sender: splits long text messages
 async function sendSafeMessage(chatId, text) {
   if (!text) return;
+  const maxChunkLength = 3900;
 
-  const maxChunkLength = 3900; // Safe threshold slightly below the 4,096 limit
-
-  // If text is within normal limits, send it directly
   if (text.length <= maxChunkLength) {
     try {
       await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
     } catch (error) {
-      console.warn('⚠️ Markdown parsing failed, sending raw fallback:', error.message);
       await bot.sendMessage(chatId, text);
     }
     return;
   }
 
-  // If text exceeds the limit, split it cleanly at paragraph boundaries
-  console.log(`📡 Splitting long report (${text.length} characters) into safe chunks...`);
   const chunks = [];
   let remainingText = text;
 
@@ -74,26 +99,23 @@ async function sendSafeMessage(chatId, text) {
       break;
     }
 
-    // Attempt to find a clean newline to split, preventing broken words or tables
     let splitIndex = remainingText.lastIndexOf('\n', maxChunkLength);
     if (splitIndex === -1) {
       splitIndex = remainingText.lastIndexOf(' ', maxChunkLength);
     }
     if (splitIndex === -1 || splitIndex < 2000) {
-      splitIndex = maxChunkLength; // Hard cut if no clean space is found
+      splitIndex = maxChunkLength;
     }
 
     chunks.push(remainingText.substring(0, splitIndex));
     remainingText = remainingText.substring(splitIndex);
   }
 
-  // Sequentially send each formatted chunk
-  for (let i = 0; i < chunks.length; i++) {
+  for (const chunk of chunks) {
     try {
-      await bot.sendMessage(chatId, chunks[i], { parse_mode: 'Markdown' });
+      await bot.sendMessage(chatId, chunk, { parse_mode: 'Markdown' });
     } catch (error) {
-      console.warn(`⚠️ Chunk ${i + 1} Markdown failed, sending raw fallback.`);
-      await bot.sendMessage(chatId, chunks[i]);
+      await bot.sendMessage(chatId, chunk);
     }
   }
 }
@@ -138,6 +160,7 @@ bot.on('message', async (msg) => {
 
   if (text === '🔔 Enable Alerts') {
     alertSubscribers.add(chatId);
+    saveSubscribers(); // Write to persistent storage
     return bot.sendMessage(
       chatId,
       '🔔 **RugGuard Live Alerts: Enabled**\n\nI will now scan trending contracts every 5 minutes and alert you immediately here if a security risk is detected.',
@@ -147,6 +170,7 @@ bot.on('message', async (msg) => {
 
   if (text === '🔕 Disable Alerts') {
     alertSubscribers.delete(chatId);
+    saveSubscribers(); // Write to persistent storage
     return bot.sendMessage(
       chatId,
       '🔕 **RugGuard Live Alerts: Disabled**\n\nBackground monitoring has been deactivated. You will no longer receive automated notifications.',
@@ -214,31 +238,23 @@ bot.on('message', async (msg) => {
   );
 
   try {
-    // Step 1: On-Chain Scan
     const securityResult = await analyzeTarget(text);
-
-    // Step 2: Tavily Search Context
     const searchQuery = securityResult.success 
       ? `${securityResult.target} ${securityResult.type}` 
       : text;
     const searchResult = await performWebSearch(searchQuery);
 
-    // Step 3: Check Bitget Spot listings if it is a token address
     let bitgetListingData = null;
     if (securityResult.success && securityResult.type !== 'url') {
       bitgetListingData = await checkBitgetListing(securityResult.target);
     }
 
     securityResult.bitgetSafetyStatus = bitgetListingData || { listed: false };
-
-    // Step 4: AI synthesis and reasoning using Alibaba Qwen
     const auditReport = await generateSecurityReport(securityResult, searchResult);
 
-    // Step 5: Extract dynamic risk score for visual gauge
     const scoreMatch = auditReport.match(/RISK SCORE:\s*(\d+)/i);
     const score = scoreMatch ? parseInt(scoreMatch[1]) : 50;
 
-    // Generate dynamic security gauge
     const targetDisplay = text.substring(0, 10) + '...';
     const gaugeUrl = generateSecurityGaugeUrl(score, targetDisplay);
 
@@ -251,28 +267,13 @@ bot.on('message', async (msg) => {
 _Deep on-chain analysis and forensic trace completed successfully. The complete, un-truncated report has been compiled and sent below._
 `;
 
-    const inlineButtons = {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: '📈 Trade Safely on Bitget', url: 'https://www.bitget.com' },
-            { text: '📣 Share Report', url: `https://t.me/share/url?url=Check%20out%20this%20RugGuard%20Audit:%20${encodeURIComponent(text)}` }
-          ]
-        ]
-      }
-    };
-
     await bot.deleteMessage(chatId, statusMsg.message_id);
 
-    // === Split-Message Delivery ===
-    // 1. Send Visual Gauge with high-impact Web2 summary card
     await bot.sendPhoto(chatId, gaugeUrl, {
       caption: summaryCaption,
-      parse_mode: 'Markdown',
-      ...inlineButtons
+      parse_mode: 'Markdown'
     });
 
-    // 2. Instantly follow up with the complete, detailed AI report using fail-safe splitter
     await sendSafeMessage(chatId, auditReport);
 
   } catch (error) {
@@ -313,26 +314,15 @@ bot.onText(/\/market\s+(.+)/, async (msg, match) => {
 🛡️ *Trading listed assets on institutional platforms like Bitget reduces standard smart-contract vulnerability risks.*
 `;
 
-      const inlineButtons = {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '📊 Trade on Bitget', url: `https://www.bitget.com/spot/${targetSymbol}USDT` }
-            ]
-          ]
-        }
-      };
-
       await bot.deleteMessage(chatId, statusMsg.message_id);
 
       if (chartUrl) {
         await bot.sendPhoto(chatId, chartUrl, {
           caption: responseText,
-          parse_mode: 'Markdown',
-          ...inlineButtons
+          parse_mode: 'Markdown'
         });
       } else {
-        await bot.sendMessage(chatId, responseText, { parse_mode: 'Markdown', ...inlineButtons });
+        await bot.sendMessage(chatId, responseText, { parse_mode: 'Markdown' });
       }
 
     } else {
@@ -363,7 +353,8 @@ setInterval(async () => {
         const address = targetToken.tokenAddress;
         const symbol = targetToken.symbol || 'UNKNOWN';
 
-        const securityResult = await analyzeTarget(address);
+        // Passes the specific chainName (e.g. solana, bsc, ethereum) to route GoPlus properly
+        const securityResult = await analyzeTarget(address, targetToken.chainId);
         const searchResult = await performWebSearch(`${symbol} ${address}`);
         
         securityResult.bitgetSafetyStatus = { listed: false };
@@ -373,8 +364,8 @@ setInterval(async () => {
         const scoreMatch = auditReport.match(/RISK SCORE:\s*(\d+)/i);
         const score = scoreMatch ? parseInt(scoreMatch[1]) : 50;
 
-        // Broadcast if high risk (score < 30)
-        if (score < 30) {
+        // Broadcast if highly critical / high confidence rug risk (score < 15)
+        if (score < 15) {
           const alertGaugeUrl = generateSecurityGaugeUrl(score, symbol);
           
           const alertSummary = `
@@ -383,8 +374,8 @@ _Coordinated Scam / Malicious Activity Detected in Trending Pools_
 
 • **Token Name:** \`${symbol}\`
 • **Contract Address:** \`${address}\`
-• **Blockchain Network:** \`${targetToken.chainId || 'solana'}\`
-• **Safety Rating:** \`${score} / 100 - HIGH RISK\`
+• **Blockchain Network:** \`${targetToken.chainId?.toUpperCase() || 'SOLANA'}\`
+• **Safety Rating:** \`${score} / 100 - CRITICAL RISK\`
 `;
 
           for (const chatId of alertSubscribers) {

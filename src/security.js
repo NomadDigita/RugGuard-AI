@@ -1,23 +1,25 @@
 import axios from 'axios';
 import { traceSolanaTokenForensics } from './forensics.js';
 
-/**
- * Checks if the string matches a standard EVM wallet/token address
- */
+// GoPlus official chain ID mapping
+const CHAIN_ID_MAP = {
+  'ethereum': '1',
+  'bsc': '56',
+  'base': '8453',
+  'polygon': '137',
+  'arbitrum': '42161',
+  'optimism': '10',
+  'solana': 'solana'
+};
+
 function isEVMAddress(address) {
   return /^0x[a-fA-F0-9]{40}$/.test(address);
 }
 
-/**
- * Checks if the string matches a standard Solana address (Base58, 32-44 chars)
- */
 function isSolanaAddress(address) {
   return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
 }
 
-/**
- * Checks if the string is a valid web URL
- */
 function isURL(str) {
   try {
     new URL(str);
@@ -27,9 +29,6 @@ function isURL(str) {
   }
 }
 
-/**
- * Scans a dApp URL for phishing and security hazards
- */
 async function checkDappSecurity(url) {
   try {
     const cleanUrl = new URL(url).origin;
@@ -51,12 +50,8 @@ async function checkDappSecurity(url) {
   }
 }
 
-/**
- * Scans a Solana token mint address, integrating GoPlus + Developer Forensics Engine
- */
 async function checkSolanaToken(address) {
   try {
-    // 1. Fetch GoPlus contract metadata
     const response = await axios.get(`https://api.gopluslabs.io/api/v1/solana/token_security`, {
       params: { addresses: address }
     });
@@ -66,7 +61,6 @@ async function checkSolanaToken(address) {
       goplusData = response.data.result[address];
     }
 
-    // 2. Perform advanced Dev Wallet Forensics and Sybil Cluster Tracking
     const forensics = await traceSolanaTokenForensics(address);
 
     return {
@@ -79,8 +73,6 @@ async function checkSolanaToken(address) {
         owner: goplusData.owner || forensics.creatorAddress || 'None',
         creatorAddress: forensics.creatorAddress || goplusData.creator_address || 'Unknown',
         topHolders: goplusData.holders || [],
-        
-        // Advanced Sybil Forensics Data
         genesisFundingSource: forensics.genesisFundingWallet || 'Direct/Unknown',
         isSybilCluster: forensics.isSybilClusterDetected,
         scamClusterAddresses: forensics.scamClusterAssociations
@@ -91,9 +83,6 @@ async function checkSolanaToken(address) {
   }
 }
 
-/**
- * Scans an EVM (Ethereum / BSC) token address for honeypots and bad structures
- */
 async function checkEVMToken(address, chainId = '1') {
   try {
     const response = await axios.get(`https://api.gopluslabs.io/api/v1/token_security/${chainId}`, {
@@ -128,8 +117,10 @@ async function checkEVMToken(address, chainId = '1') {
 
 /**
  * Router interface for RugGuard security analysis
+ * @param {string} input Contract address or URL
+ * @param {string} chainName Optional blockchain chain identifier from DexScreener
  */
-export async function analyzeTarget(input) {
+export async function analyzeTarget(input, chainName = '') {
   const target = input.trim();
 
   if (isURL(target)) {
@@ -141,7 +132,9 @@ export async function analyzeTarget(input) {
   }
 
   if (isEVMAddress(target)) {
-    return await checkEVMToken(target, '1');
+    // Map network name to the correct GoPlus chain ID, defaulting to Ethereum ('1')
+    const mappedChainId = CHAIN_ID_MAP[chainName?.toLowerCase()] || '1';
+    return await checkEVMToken(target, mappedChainId);
   }
 
   return {
