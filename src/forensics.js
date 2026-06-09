@@ -1,7 +1,14 @@
 import axios from 'axios';
+import dotenv from 'dotenv';
 
-const SOLANA_RPC_URL = 'https://api.mainnet-beta.solana.com';
+dotenv.config();
 
+// Use custom Solana RPC URL if provided, otherwise fallback to the public node
+const SOLANA_RPC_URL = process.env.SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com';
+
+/**
+ * Executes a raw JSON-RPC query on the Solana network
+ */
 async function solanaRpcRequest(method, params) {
   try {
     const response = await axios.post(SOLANA_RPC_URL, {
@@ -17,6 +24,10 @@ async function solanaRpcRequest(method, params) {
   }
 }
 
+/**
+ * Analyzes Solana Token authorities and traces the creator identity and funding lineage
+ * @param {string} mintAddress The Solana token contract address
+ */
 export async function traceSolanaTokenForensics(mintAddress) {
   const report = {
     targetMint: mintAddress,
