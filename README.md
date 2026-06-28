@@ -5,7 +5,8 @@
 RugGuard AI is an autonomous, on-chain security agent and forensic tracing system packaged as an interactive Telegram Bot. Built for the Bitget AI Base Camp Hackathon S1, it provides instant contract audits, developer genesis funding tracking, Sybil scam cluster identification, cabal ring centralization checks, and live Bitget Spot market utility integrations.
 
 ---
-
+# NEW VERSION SOON...
+---
 ## ⚙️ Core Architecture & Features
 
 ### 1. Multi-Chain Smart Contract Audit Router
